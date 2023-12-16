@@ -3,8 +3,8 @@
 #include <cstdint>
 #include "MinHook/MinHook.h"
 #include "Structures.h"
+#include "ConsoleManager.h"
 #include <intrin.h>
-#include <queue>
 #include <chrono>
 #include <thread>
 
@@ -13,15 +13,6 @@ DWORD RakPeer__Connect = 0;
 bool Inited = false;
 
 #pragma intrinsic(_ReturnAddress)
-void CreateConsole() {
-    if (!AllocConsole()) {
-        return;
-    }
-    FILE* fDummy;
-    freopen_s(&fDummy, "CONOUT$", "w", stdout);
-    freopen_s(&fDummy, "CONOUT$", "w", stderr);
-    freopen_s(&fDummy, "CONIN$", "r", stdin);
-}
 
 
 void MH_CreateAndEnableHook(unsigned __int32&& TargetAddress, LPVOID pDetour, LPVOID* ppOriginal) {
@@ -151,7 +142,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     {
     case DLL_PROCESS_ATTACH: {
         DisableThreadLibraryCalls(hinstDLL);
-        CreateConsole();
+        ConsoleManager::get_instance().create_console();
         MH_Initialize();
         auto hSAMP = GetModuleHandle(L"samp.dll");
         if (hSAMP) {
