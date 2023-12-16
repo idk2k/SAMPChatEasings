@@ -1,4 +1,4 @@
-#include <wincon.h>
+#include <windows.h>
 #include <cstdio>
 #include "ConsoleManager.h"
 

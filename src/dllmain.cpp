@@ -4,6 +4,7 @@
 #include "MinHook/MinHook.h"
 #include "Structures.h"
 #include "ConsoleManager.h"
+#include "EasingsHolder.h"
 #include <intrin.h>
 #include <chrono>
 #include <thread>
@@ -13,7 +14,6 @@ DWORD RakPeer__Connect = 0;
 bool Inited = false;
 
 #pragma intrinsic(_ReturnAddress)
-
 
 void MH_CreateAndEnableHook(unsigned __int32&& TargetAddress, LPVOID pDetour, LPVOID* ppOriginal) {
     MH_CreateHook(reinterpret_cast<LPVOID>(TargetAddress), pDetour, ppOriginal);
@@ -88,7 +88,7 @@ void __fastcall HOOK_RenderEntry(void* dis, void* EDX, const char* szText, CRect
         if (increments == 250) {
             start = false;
         }
-        double easing = max_adjust_value * easeOutBounce(increments * (0.004));
+        double easing = max_adjust_value * EasingsHolder::get_instance().easeOutBounce(increments * (0.004));
         rect.top += max_adjust_value - long(easing);
         rect.bottom += max_adjust_value - long(easing);
         prev_easing = easing;

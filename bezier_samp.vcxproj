@@ -135,9 +135,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\ConsoleManager.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
+    <ClCompile Include="src\EasingsHolder.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\ConsoleManager.h" />
+    <ClInclude Include="src\EasingsHolder.h" />
     <ClInclude Include="src\Structures.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
