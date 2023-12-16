@@ -1,7 +1,7 @@
 #include <iostream>
 #include <Windows.h>
 #include <cstdint>
-#include "MinHook.h"
+#include "MinHook/MinHook.h"
 #include "Structures.h"
 #include <intrin.h>
 #include <queue>
