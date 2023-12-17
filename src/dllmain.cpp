@@ -21,7 +21,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 bool initialize{false};
 bool bMenuOpen{false};
-bool bCursorShown{ false };
+bool bCursorShown{false};
 
 WNDPROC m_pWindowProc;
 
@@ -29,7 +29,8 @@ using ProtPresent = HRESULT(__stdcall*)(IDirect3DDevice9*, CONST RECT*, CONST RE
 using ProtReset = HRESULT(__stdcall*)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
 ProtReset Reset;
 ProtPresent Present;
-HRESULT __stdcall Hooked_Present(IDirect3DDevice9* pDevice, CONST RECT* pSrcRect, CONST RECT* pDestRect, HWND hDestWindow, CONST RGNDATA* pDirtyRegion);
+HRESULT __stdcall Hooked_Present(IDirect3DDevice9* pDevice, CONST RECT* pSrcRect, CONST RECT* pDestRect,
+                                 HWND hDestWindow, CONST RGNDATA* pDirtyRegion);
 HRESULT __stdcall Hooked_Reset(LPDIRECT3DDEVICE9 pDevice, D3DPRESENT_PARAMETERS* pPresentParams);
 void InstallD3DHook() {
     DWORD pDevice = *reinterpret_cast<DWORD*>(0xC97C28);
@@ -46,19 +47,21 @@ DWORD SAMP_FUNC_ADDCLIENTCMD = 0x65AD0;
 DWORD SAMP_FUNC_TOGGLECURSOR = 0x9BD30;
 DWORD SAMP_FUNC_CURSORUNLOCKACTORCAM = 0x9BC10;
 
-
 bool ToggleCursor(bool state);
-HRESULT __stdcall Hooked_Present(IDirect3DDevice9* pDevice, CONST RECT* pSrcRect, CONST RECT* pDestRect, HWND hDestWindow, CONST RGNDATA* pDirtyRegion) {
+HRESULT __stdcall Hooked_Present(IDirect3DDevice9* pDevice, CONST RECT* pSrcRect, CONST RECT* pDestRect,
+                                 HWND hDestWindow, CONST RGNDATA* pDirtyRegion) {
     static bool once = false;
     if (!once) {
         ImGui::CreateContext();
         ImGui_ImplWin32_Init(**reinterpret_cast<HWND**>(0xC17054));
 #pragma warning(push)
-#pragma warning(disable: 4996)
-        std::string font{ getenv("WINDIR") }; font += "\\Fonts\\Tahoma.TTF";
+#pragma warning(disable : 4996)
+        std::string font{getenv("WINDIR")};
+        font += "\\Fonts\\Tahoma.TTF";
 #pragma warning(pop)
-        ImGui::GetIO().Fonts->AddFontFromFileTTF(font.c_str(), 14.0f, NULL, ImGui::GetIO().Fonts->GetGlyphRangesCyrillic());
-        //Theme();
+        ImGui::GetIO().Fonts->AddFontFromFileTTF(font.c_str(), 14.0f, NULL,
+                                                 ImGui::GetIO().Fonts->GetGlyphRangesCyrillic());
+        // Theme();
         ImGui_ImplDX9_Init(pDevice);
         once = true;
     }
@@ -71,12 +74,15 @@ HRESULT __stdcall Hooked_Present(IDirect3DDevice9* pDevice, CONST RECT* pSrcRect
         }
         int sx = *reinterpret_cast<int*>(0x00C17044), sy = *reinterpret_cast<int*>(0x00C17048);
         ImGui::SetNextWindowPos(ImVec2(sx / 2, sy / 2), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Настройки", &bMenuOpen, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
+        ImGui::Begin("SAMPChatEasings Menu", &bMenuOpen,
+                     ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
 
+        ImGui::SameLine();
+        if (ImGui::Button("some sfuffffsdjfdsijfsi")) {
+        }
 
         ImGui::End();
-    }
-    else if (bCursorShown == 1) {
+    } else if (bCursorShown == 1) {
         bCursorShown = ToggleCursor(0);
     }
     ImGui::EndFrame();
@@ -98,9 +104,8 @@ struct Addresses {
 
 bool ToggleCursor(bool state) {
     void* obj = *(void**)(addresses.samp_base + SAMP_GAME_PTR);
-    ((void(__thiscall*) (void*, int, bool)) (addresses.samp_base + SAMP_FUNC_TOGGLECURSOR))(obj, state ? 3 : 0, !state);
-    if (!state)
-        ((void(__thiscall*) (void*)) (addresses.samp_base + SAMP_FUNC_CURSORUNLOCKACTORCAM))(obj);
+    ((void(__thiscall*)(void*, int, bool))(addresses.samp_base + SAMP_FUNC_TOGGLECURSOR))(obj, state ? 3 : 0, !state);
+    if (!state) ((void(__thiscall*)(void*))(addresses.samp_base + SAMP_FUNC_CURSORUNLOCKACTORCAM))(obj);
     return state;
 }
 
