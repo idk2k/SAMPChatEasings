@@ -1,160 +1,143 @@
-#include <iostream>
 #include <Windows.h>
+#include <intrin.h>
+
 #include <cstdint>
-#include "MinHook/MinHook.h"
-#include "Structures.h"
+#include <iostream>
+
 #include "ConsoleManager.h"
 #include "EasingsHolder.h"
-#include <intrin.h>
-#include <chrono>
-#include <thread>
-
-DWORD dwSAMP = 0;
-DWORD RakPeer__Connect = 0;
-bool Inited = false;
-
+#include "MinHook/MinHook.h"
+#include "Structures.h"
+#include "UtilityHelper.h"
 #pragma intrinsic(_ReturnAddress)
 
-void MH_CreateAndEnableHook(unsigned __int32&& TargetAddress, LPVOID pDetour, LPVOID* ppOriginal) {
-    MH_CreateHook(reinterpret_cast<LPVOID>(TargetAddress), pDetour, ppOriginal);
-    MH_EnableHook(reinterpret_cast<LPVOID>(TargetAddress));
-}
+bool initialize{false};
 
-struct RenderEntryParametes {
-    RenderEntryParametes(void* _dis, void* _EDX, const char* _szText, CRect _rect, D3DCOLOR _color) : dis{ _dis }, EDX{ _EDX }, color{ _color }, rect{ _rect }, szText{_szText} {}
-    void* dis;
-    void* EDX;
-    const char* szText;
-    D3DCOLOR color;
-    CRect rect;
-};
+struct Addresses {
+    std::uintptr_t samp_base;
+    std::uintptr_t g_chat;
+    std::uintptr_t rakpeer_connect;
+} addresses{};
 
-/*
-* F L A G S 
-* FOR USAGE
-*/
-bool bNewEntryAdded = false;
-bool start = false;
-int max_adjust_value = 20;
-int increments = 0;
-double prev_easing = 0;
-// offset for last message
-int message_top_offset = 0;
+struct Parameters {
+    bool bNewEntryAdded;
+    bool running;
+    int max_adjust_value;
+    int increments;
+    double prev_easing;
+    int message_top_offset;
+} global_params{false, false, 20, 0, .0f, 0};
 
-
-typedef void(__fastcall* RecalcFontSize_t)(void*, void*);
-RecalcFontSize_t fpRecalcFontSize = 0;
-void __fastcall HOOK_RecalcFontSize(void* dis, void* EDX) {
-    fpRecalcFontSize(dis, EDX);
+using RecalcFontSize_t = void(__fastcall*)(void*, void*);
+RecalcFontSize_t fpRecalcFontSize{};
+auto __fastcall RecalcFontSizeHooked(void* reg_ecx, void* reg_edx) -> void {
+    fpRecalcFontSize(reg_ecx, reg_edx);
     // recalc / get message top offset
-    static DWORD g_chat = 0;
-    static DWORD oldProtect{};
-    if (!g_chat) {
-        VirtualProtect((void*)(dwSAMP + 0x21A0E4), 4, PAGE_EXECUTE_READWRITE, &oldProtect);
-        memcpy(&g_chat, (void*)(dwSAMP + 0x21A0E4), 4);
-        VirtualProtect((void*)(dwSAMP + 0x21A0E4), 4, oldProtect, &oldProtect);
+    if (!addresses.g_chat) {
+        utils::protect_safe_memory_copy(&addresses.g_chat, (void*)(addresses.samp_base + 0x21A0E4), 0x4);
     }
-    memcpy(&message_top_offset, (void*)(g_chat + 0x63E2), 4);
-    message_top_offset *= 9;
-    message_top_offset += 19;
+    if (memcmp(&global_params.message_top_offset, (void*)(addresses.g_chat + 0x63E2), 4) != 0) {
+        memcpy(&global_params.message_top_offset, (void*)(addresses.g_chat + 0x63E2), 4);
+        global_params.message_top_offset *= 9;
+        global_params.message_top_offset += 19;
+    }
 }
 
-typedef void(__fastcall* AddEntry_t)(void*, void*, int, const char*, const char*, D3DCOLOR, D3DCOLOR);
-AddEntry_t fpAddEntry = 0;
-void __fastcall HOOK_AddEntry(void* dis, void* EDX, int nType, const char* szText, const char* szPrefix, D3DCOLOR textColor, D3DCOLOR prefixColor) {
-    bNewEntryAdded = true;
-    fpAddEntry(dis, EDX, nType, szText, szPrefix, textColor, prefixColor);
+using AddEntry_t = void(__fastcall*)(void*, void*, int, const char*, const char*, structures::D3DCOLOR,
+                                     structures::D3DCOLOR);
+AddEntry_t fpAddEntry{};
+auto __fastcall AddEntryHooked(void* reg_ecx, void* reg_edx, int nType, const char* szText, const char* szPrefix,
+                               structures::D3DCOLOR textColor, structures::D3DCOLOR prefixColor) -> void {
+    global_params.bNewEntryAdded = true;
+    fpAddEntry(reg_ecx, reg_edx, nType, szText, szPrefix, textColor, prefixColor);
 }
 
-int time_duration = 1000;
-int start_time_point = 0;
-
-typedef void(__fastcall* RenderEntry_t)(void*, void*, const char*, CRect, D3DCOLOR);
-RenderEntry_t fpRenderEntry = 0;
-void __fastcall HOOK_RenderEntry(void* dis, void* EDX, const char* szText, CRect rect, D3DCOLOR color) {
-
-    //std::cout << "rect.top: " << rect.top << "\t\trect.bottom: " << rect.bottom << std::endl;
-    std::cout << message_top_offset << std::endl;
-
-    if (message_top_offset && bNewEntryAdded && rect.top == message_top_offset) {
-        bNewEntryAdded = false;
-        if (!start) {
-            start = true;
-            increments = 0;
+using RenderEntry_t = void(__fastcall*)(void*, void*, const char*, structures::CRect, structures::D3DCOLOR);
+RenderEntry_t fpRenderEntry{};
+auto __fastcall RenderEntryHooked(void* reg_ecx, void* reg_edx, const char* szText, structures::CRect rect,
+                                  structures::D3DCOLOR color) -> void {
+    if (global_params.message_top_offset && global_params.bNewEntryAdded &&
+        rect.top == global_params.message_top_offset) {
+        global_params.bNewEntryAdded = false;
+        if (!global_params.running) {
+            global_params.running = true;
+            global_params.increments = 0;
         }
     }
 
-    if (start && rect.top == message_top_offset) {
-        if (increments == 250) {
-            start = false;
+    if (global_params.running && rect.top == global_params.message_top_offset) {
+        if (global_params.increments >= 250) {
+            global_params.running = false;
         }
-        double easing = max_adjust_value * EasingsHolder::get_instance().easeOutBounce(increments * (0.004));
-        rect.top += max_adjust_value - long(easing);
-        rect.bottom += max_adjust_value - long(easing);
-        prev_easing = easing;
-        increments += 1;
+        double easing = global_params.max_adjust_value *
+                        EasingsHolder::get_instance().easeOutBounce(global_params.increments * (0.004));
+        rect.top += global_params.max_adjust_value - long(easing);
+        rect.bottom += global_params.max_adjust_value - long(easing);
+        global_params.prev_easing = easing;
+        global_params.increments += 1;
     }
 
-    fpRenderEntry(dis, EDX, szText, rect, color);
+    fpRenderEntry(reg_ecx, reg_edx, szText, rect, color);
 }
 
+using RakPeer_Connect = bool(__fastcall*)(void*, void*, const char*, unsigned short, char*, int);
+RakPeer_Connect fpConnect{};
+auto __fastcall RakPeerConnectHooked(void* reg_ecx, void* reg_edx, const char* host, unsigned short port,
+                                     char* passwordData, int passwordDataLength) -> bool {
+    if (!initialize) {
+        // force install m_bRedraw flag to 1
+        utils::protect_safe_memory_set((void*)(addresses.samp_base + 0x6441C + 6U), 1, 1);
 
-
-typedef bool(__fastcall* RakPeer_Connect)(void*, void*, const char*, unsigned short, char*, int);
-RakPeer_Connect fpConnect = 0;
-bool __fastcall HOOK_RakPeer_Connect(void* dis, void* EDX, const char* host, unsigned short port, char* passwordData, int passwordDataLength) {
-    if (Inited == false) {
-        // hard install m_bRedraw flag to 1
-        DWORD oldProtect{};
-        VirtualProtect((void*)(dwSAMP + 0x6441C + 6U), 1, PAGE_EXECUTE_READWRITE, &oldProtect);
-        memset((void*)(dwSAMP + 0x6441C + 6U), 0x01, 1);
-        VirtualProtect((void*)(dwSAMP + 0x6441C + 6U), 1, oldProtect, &oldProtect);
-        
         // get message top offset
-        DWORD g_chat = 0;
-        VirtualProtect((void*)(dwSAMP + 0x21A0E4), 4, PAGE_EXECUTE_READWRITE, &oldProtect);
-        memcpy(&g_chat, (void*)(dwSAMP + 0x21A0E4), 4);
-        VirtualProtect((void*)(dwSAMP + 0x21A0E4), 4, oldProtect, &oldProtect);
-        memcpy(&message_top_offset, (void*)(g_chat + 0x63E2), 4);
-        message_top_offset *= 9;
-        message_top_offset += 19;
+        if (!addresses.g_chat) {
+            utils::protect_safe_memory_copy(&addresses.g_chat, (void*)(addresses.samp_base + 0x21A0E4), 0x4);
+        }
+        if (memcmp(&global_params.message_top_offset, (void*)(addresses.g_chat + 0x63E2), 4) != 0) {
+            memcpy(&global_params.message_top_offset, (void*)(addresses.g_chat + 0x63E2), 4);
+            global_params.message_top_offset *= 9;
+            global_params.message_top_offset += 19;
+        }
 
-        // Hook on samp.dll - RenderEntry()
-        MH_CreateHook(reinterpret_cast<LPVOID>(dwSAMP + 0x638A0), &HOOK_RenderEntry, reinterpret_cast<LPVOID*>(&fpRenderEntry));
-        MH_EnableHook(reinterpret_cast<LPVOID>(dwSAMP + 0x638A0));
+        utils::MH_CreateAndEnableHook(static_cast<std::uintptr_t>(addresses.samp_base + 0x638A0), &RenderEntryHooked,
+                                      reinterpret_cast<LPVOID*>(&fpRenderEntry));
+        utils::MH_CreateAndEnableHook(static_cast<std::uintptr_t>(addresses.samp_base + 0x64010), &AddEntryHooked,
+                                      reinterpret_cast<LPVOID*>(&fpAddEntry));
+        utils::MH_CreateAndEnableHook(static_cast<std::uintptr_t>(addresses.samp_base + 0x63550), &RecalcFontSizeHooked,
+                                      reinterpret_cast<LPVOID*>(&fpRecalcFontSize));
 
-        // Hook on samp.dll - AddEntry()
-        MH_CreateHook(reinterpret_cast<LPVOID>(dwSAMP + 0x64010), &HOOK_AddEntry, reinterpret_cast<LPVOID*>(&fpAddEntry));
-        MH_EnableHook(reinterpret_cast<LPVOID>(dwSAMP + 0x64010));
-
-        // Hook on samp.dll - RecalcFontSize()
-        MH_CreateHook(reinterpret_cast<LPVOID>(dwSAMP + 0x63550), &HOOK_RecalcFontSize, reinterpret_cast<LPVOID*>(&fpRecalcFontSize));
-        MH_EnableHook(reinterpret_cast<LPVOID>(dwSAMP + 0x63550));
-
-        Inited = true;
+        initialize = true;
     }
-    return fpConnect(dis, EDX, host, port, passwordData, passwordDataLength);
+    return fpConnect(reg_ecx, reg_edx, host, port, passwordData, passwordDataLength);
 }
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
+auto WINAPI DllMain(HINSTANCE dllinstance, DWORD reason, LPVOID lpvReserved) -> BOOL {
     UNREFERENCED_PARAMETER(lpvReserved);
-    switch (fdwReason)
-    {
-    case DLL_PROCESS_ATTACH: {
-        DisableThreadLibraryCalls(hinstDLL);
-        ConsoleManager::get_instance().create_console();
-        MH_Initialize();
-        auto hSAMP = GetModuleHandle(L"samp.dll");
-        if (hSAMP) {
-            dwSAMP = reinterpret_cast<DWORD>(hSAMP);
-            RakPeer__Connect = 0x3ABB0;
-            if (RakPeer__Connect != 0) {
-                MH_STATUS rkpr_hook_status = MH_CreateHook(reinterpret_cast<LPVOID>(dwSAMP + RakPeer__Connect), &HOOK_RakPeer_Connect, reinterpret_cast<LPVOID*>(&fpConnect));
-                rkpr_hook_status = MH_EnableHook(reinterpret_cast<LPVOID>(dwSAMP + RakPeer__Connect));
+    switch (reason) {
+        case DLL_PROCESS_ATTACH: {
+            DisableThreadLibraryCalls(dllinstance);
+            if (ConsoleManager::get_instance().create_console() == FALSE) {
+                std::cout << "[ERROR]: ConsoleManager::get_instance().create_console() failed" << std::endl;
+                return FALSE;
             }
+            if (MH_STATUS mh_init_status = MH_Initialize(); mh_init_status != MH_OK) {
+                std::cout << "[ERROR]: MH_Initialize() failed, return code: " << mh_init_status << std::endl;
+                return FALSE;
+            }
+            auto samp_handle = GetModuleHandleW(L"samp.dll");
+            if (!samp_handle) {
+                std::cout << "[ERROR]: samp_handle getting failed" << std::endl;
+                return FALSE;
+            }
+            addresses.samp_base = reinterpret_cast<std::uintptr_t>(samp_handle);
+            addresses.rakpeer_connect = 0x3ABB0;
+            if (!addresses.rakpeer_connect) {
+                std::cout << "[ERROR]: no RakPeer__Connect address" << std::endl;
+                return FALSE;
+            }
+            utils::MH_CreateAndEnableHook(static_cast<std::uintptr_t>(addresses.samp_base + addresses.rakpeer_connect),
+                                          &RakPeerConnectHooked, reinterpret_cast<LPVOID*>(&fpConnect));
+            break;
         }
-        break;
-    }
     }
     return TRUE;
 }

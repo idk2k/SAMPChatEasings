@@ -1,9 +1,14 @@
-#pragma once
+#ifndef STRUCTURES_H
+#define STRUCTURES_H
 
-typedef DWORD D3DCOLOR;
+namespace structures {
+    using D3DCOLOR = DWORD;
+    class CRect {
+    public:
+        long left, top;
+        long right, bottom;
+    };
 
-class CRect {
-public:
-    long left, top;
-    long right, bottom;
-};
+}  // namespace structures
+
+#endif  // STRUCTURES_H

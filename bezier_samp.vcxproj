@@ -138,11 +138,13 @@
     <ClCompile Include="src\ConsoleManager.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\EasingsHolder.cpp" />
+    <ClCompile Include="src\UtilityHelper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\ConsoleManager.h" />
     <ClInclude Include="src\EasingsHolder.h" />
     <ClInclude Include="src\Structures.h" />
+    <ClInclude Include="src\UtilityHelper.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
