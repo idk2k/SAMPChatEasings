@@ -9,15 +9,100 @@
 #include "MinHook/MinHook.h"
 #include "Structures.h"
 #include "UtilityHelper.h"
+#include "d3d9.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_dx9.h"
+#include "imgui/imgui_impl_win32.h"
+#pragma execution_character_set("utf-8")
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 #pragma intrinsic(_ReturnAddress)
 
 bool initialize{false};
+bool bMenuOpen{false};
+bool bCursorShown{ false };
+
+WNDPROC m_pWindowProc;
+
+using ProtPresent = HRESULT(__stdcall*)(IDirect3DDevice9*, CONST RECT*, CONST RECT*, HWND, CONST RGNDATA*);
+using ProtReset = HRESULT(__stdcall*)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
+ProtReset Reset;
+ProtPresent Present;
+HRESULT __stdcall Hooked_Present(IDirect3DDevice9* pDevice, CONST RECT* pSrcRect, CONST RECT* pDestRect, HWND hDestWindow, CONST RGNDATA* pDirtyRegion);
+HRESULT __stdcall Hooked_Reset(LPDIRECT3DDEVICE9 pDevice, D3DPRESENT_PARAMETERS* pPresentParams);
+void InstallD3DHook() {
+    DWORD pDevice = *reinterpret_cast<DWORD*>(0xC97C28);
+    void** vTable = *reinterpret_cast<void***>(pDevice);
+
+    MH_CreateHook(vTable[17], Hooked_Present, reinterpret_cast<LPVOID*>(&Present));
+    MH_EnableHook(vTable[17]);
+    MH_CreateHook(vTable[16], Hooked_Reset, reinterpret_cast<LPVOID*>(&Reset));
+    MH_EnableHook(vTable[16]);
+}
+
+DWORD SAMP_GAME_PTR = 0x21A10C;
+DWORD SAMP_FUNC_ADDCLIENTCMD = 0x65AD0;
+DWORD SAMP_FUNC_TOGGLECURSOR = 0x9BD30;
+DWORD SAMP_FUNC_CURSORUNLOCKACTORCAM = 0x9BC10;
+
+
+bool ToggleCursor(bool state);
+HRESULT __stdcall Hooked_Present(IDirect3DDevice9* pDevice, CONST RECT* pSrcRect, CONST RECT* pDestRect, HWND hDestWindow, CONST RGNDATA* pDirtyRegion) {
+    static bool once = false;
+    if (!once) {
+        ImGui::CreateContext();
+        ImGui_ImplWin32_Init(**reinterpret_cast<HWND**>(0xC17054));
+#pragma warning(push)
+#pragma warning(disable: 4996)
+        std::string font{ getenv("WINDIR") }; font += "\\Fonts\\Tahoma.TTF";
+#pragma warning(pop)
+        ImGui::GetIO().Fonts->AddFontFromFileTTF(font.c_str(), 14.0f, NULL, ImGui::GetIO().Fonts->GetGlyphRangesCyrillic());
+        //Theme();
+        ImGui_ImplDX9_Init(pDevice);
+        once = true;
+    }
+    ImGui_ImplDX9_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+    if (bMenuOpen) {
+        if (bCursorShown == 0) {
+            bCursorShown = ToggleCursor(1);
+        }
+        int sx = *reinterpret_cast<int*>(0x00C17044), sy = *reinterpret_cast<int*>(0x00C17048);
+        ImGui::SetNextWindowPos(ImVec2(sx / 2, sy / 2), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Настройки", &bMenuOpen, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse);
+
+
+        ImGui::End();
+    }
+    else if (bCursorShown == 1) {
+        bCursorShown = ToggleCursor(0);
+    }
+    ImGui::EndFrame();
+    ImGui::Render();
+    ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+    return Present(pDevice, pSrcRect, pDestRect, hDestWindow, pDirtyRegion);
+}
+
+HRESULT __stdcall Hooked_Reset(LPDIRECT3DDEVICE9 pDevice, D3DPRESENT_PARAMETERS* pPresentParams) {
+    ImGui_ImplDX9_InvalidateDeviceObjects();
+    return Reset(pDevice, pPresentParams);
+}
 
 struct Addresses {
     std::uintptr_t samp_base;
     std::uintptr_t g_chat;
     std::uintptr_t rakpeer_connect;
 } addresses{};
+
+bool ToggleCursor(bool state) {
+    void* obj = *(void**)(addresses.samp_base + SAMP_GAME_PTR);
+    ((void(__thiscall*) (void*, int, bool)) (addresses.samp_base + SAMP_FUNC_TOGGLECURSOR))(obj, state ? 3 : 0, !state);
+    if (!state)
+        ((void(__thiscall*) (void*)) (addresses.samp_base + SAMP_FUNC_CURSORUNLOCKACTORCAM))(obj);
+    return state;
+}
 
 struct Parameters {
     bool bNewEntryAdded;
@@ -80,11 +165,41 @@ auto __fastcall RenderEntryHooked(void* reg_ecx, void* reg_edx, const char* szTe
     fpRenderEntry(reg_ecx, reg_edx, szText, rect, color);
 }
 
+LRESULT __stdcall WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_KEYDOWN: {
+            switch (wParam) {
+                case VK_F12: {
+                    bMenuOpen = !bMenuOpen;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    if (bMenuOpen) {
+        if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
+            return true;
+        }
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.WantCaptureMouse || io.WantCaptureKeyboard) {
+            return true;
+        }
+    }
+    return CallWindowProcA(m_pWindowProc, hWnd, msg, wParam, lParam);
+}
+
 using RakPeer_Connect = bool(__fastcall*)(void*, void*, const char*, unsigned short, char*, int);
 RakPeer_Connect fpConnect{};
 auto __fastcall RakPeerConnectHooked(void* reg_ecx, void* reg_edx, const char* host, unsigned short port,
                                      char* passwordData, int passwordDataLength) -> bool {
     if (!initialize) {
+        // wndproc hook
+        m_pWindowProc = reinterpret_cast<WNDPROC>(
+            SetWindowLongA(*reinterpret_cast<HWND*>(0xC97C1CU), GWL_WNDPROC, reinterpret_cast<LONG>(WndProcHandler)));
+        // d3d9 hook (present, reset)
+        InstallD3DHook();
+
         // force install m_bRedraw flag to 1
         utils::protect_safe_memory_set((void*)(addresses.samp_base + 0x6441C + 6U), 1, 1);
 
