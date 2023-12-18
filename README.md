@@ -1,6 +1,6 @@
 # SAMPChatEasings
 
-Compatible: 0.3.7 R1
+Compatibility: 0.3.7 R1
 
 ## Idea
 Add feature to native chat-system: easing of last message.\
